@@ -1,0 +1,21 @@
+{
+  "name": "nexus-77",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NEXUS-77 — cyberpunk 3D web game (three.js + Vite + TypeScript)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.8"
+  }
+}
