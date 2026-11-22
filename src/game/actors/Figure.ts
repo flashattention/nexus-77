@@ -47,6 +47,8 @@ export interface FigureLook {
   bulk?: number;
   hood?: boolean;
   gun?: boolean;
+  /** Glowing data projection (Ch5 allies): emissive body in the look's colours. */
+  holo?: boolean;
   /** Use these materials instead of the shared cache (Viper's cloak). */
   materials?: { body: THREE.Material; legs: THREE.Material; skin: THREE.Material; accent: THREE.Material };
 }
@@ -75,9 +77,9 @@ export class Figure {
 
   constructor(kit: FigureKit, look: FigureLook) {
     const b = look.bulk ?? 1;
-    const mb = look.materials?.body ?? kit.std(look.body);
-    const ml = look.materials?.legs ?? kit.std(look.legs);
-    const ms = look.materials?.skin ?? kit.std(look.skin, 0.6);
+    const mb = look.materials?.body ?? (look.holo ? kit.glow(look.body, 0.9) : kit.std(look.body));
+    const ml = look.materials?.legs ?? (look.holo ? kit.glow(look.legs, 0.6) : kit.std(look.legs));
+    const ms = look.materials?.skin ?? (look.holo ? kit.glow(look.skin, 0.7) : kit.std(look.skin, 0.6));
     const ma = look.materials?.accent ?? kit.glow(look.accent);
     const add = (g: THREE.BufferGeometry, m: THREE.Material, parent: THREE.Object3D, x: number, y: number, z: number): THREE.Mesh => {
       const mesh = new THREE.Mesh(g, m);

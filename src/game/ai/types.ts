@@ -6,7 +6,10 @@ import type { Bolts } from './Drone';
 import type { Target } from '../player/Weapon';
 import type { RailRide } from '../player/RailRide';
 
-export type BoltKind = 'drone' | 'gang' | 'viper' | 'helix' | 'heavy';
+export type BoltKind = 'drone' | 'gang' | 'viper' | 'helix' | 'heavy' | 'flame' | 'data';
+
+/** What Glitch's hack pulse did to an enemy (see Enemy.onPulse). */
+export type PulseResult = 'hacked' | 'rescued' | 'ignored';
 
 /** Everything an enemy needs from the session. */
 export interface CombatEnv {
@@ -36,6 +39,13 @@ export interface Enemy extends Target {
   despawn(): void;
   /** Aegis's shield bash hit this enemy (knock back / stagger). */
   shove?(from: THREE.Vector3): void;
+  /** Machines take EMP bonus damage and can be hacked into temporary allies. */
+  readonly machine?: boolean;
+  /**
+   * Custom reaction to Glitch's hack pulse (rescue an infected resident, open
+   * the Grinder's vents). Without it, machines get the generic temporary hack.
+   */
+  onPulse?(): PulseResult;
 }
 
 /** Anything that shows the boss bar. */

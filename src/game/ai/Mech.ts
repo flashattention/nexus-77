@@ -20,6 +20,7 @@ const _aim = new THREE.Vector3();
 type State = 'walk' | 'spin' | 'fire' | 'stomp' | 'stagger' | 'down' | 'gone';
 
 export class Mech implements Enemy {
+  readonly machine = true;
   readonly root = new THREE.Group();
   readonly hitCenter = new THREE.Vector3();
   readonly hitRadius = 0.85;

@@ -3,7 +3,7 @@ import type { World } from '../World';
 import type { Sparks } from '../fx/Sparks';
 import type { FPSController } from '../player/FPSController';
 import type { Vec3T } from '../../data/chapters/types';
-import type { CombatEnv, Enemy } from './types';
+import type { BoltKind, CombatEnv, Enemy } from './types';
 
 const DETECT_RANGE = 15;
 const DETECT_TIME = 0.45;
@@ -39,9 +39,12 @@ export class DroneKit {
   readonly trim = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x00f0ff, emissiveIntensity: 2 });
   readonly dummyHull = new THREE.MeshStandardMaterial({ color: 0x3a3a2e, metalness: 0.4, roughness: 0.7 });
   readonly allyTrim = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x39ff88, emissiveIntensity: 2.5 });
+  // Ch4 spider drones / Ch5 virus crawlers.
+  readonly spiderBody = new THREE.SphereGeometry(0.24, 8, 6);
+  readonly spiderLeg = new THREE.BoxGeometry(0.78, 0.035, 0.05);
 
   dispose(): void {
-    for (const g of [this.body, this.ring, this.rotor, this.eye]) g.dispose();
+    for (const g of [this.body, this.ring, this.rotor, this.eye, this.spiderBody, this.spiderLeg]) g.dispose();
     for (const m of [this.hull, this.trim, this.dummyHull, this.allyTrim]) m.dispose();
   }
 }
@@ -52,6 +55,8 @@ export interface BoltStyle {
   damage: number;
   /** Core radius. */
   size?: number;
+  /** Seconds before the bolt fizzles (short-range flame). Default 3. */
+  life?: number;
 }
 
 /** Pooled enemy projectiles of one style. */
@@ -86,7 +91,7 @@ export class Bolts {
     this.vel[i].multiplyScalar(this.style.speed);
     b.lookAt(to);
     b.visible = true;
-    this.life[i] = 3;
+    this.life[i] = this.style.life ?? 3;
   }
 
   clear(): void {
@@ -147,9 +152,14 @@ export interface DroneOpts {
   alarm?: boolean;
   hp?: number;
   drop?: string;
+  /** Ring colour override (Ch5 virus drones). */
+  tint?: number;
+  /** Projectile style (default 'drone'). */
+  bolt?: BoltKind;
 }
 
 export class Drone implements Enemy {
+  readonly machine = true;
   readonly root = new THREE.Group();
   readonly hitCenter: THREE.Vector3;
   readonly hitRadius = 0.48;
@@ -162,6 +172,7 @@ export class Drone implements Enemy {
 
   private eyeMat: THREE.MeshStandardMaterial;
   private ringMat: THREE.MeshStandardMaterial | null = null;
+  private bolt: BoltKind;
   private rotors: THREE.Mesh[] = [];
   private patrol: THREE.Vector3[];
   private home: THREE.Vector3;
@@ -192,7 +203,8 @@ export class Drone implements Enemy {
     const body = new THREE.Mesh(kit.body, this.isDummy ? kit.dummyHull : kit.hull);
     body.scale.set(1, 0.7, 1);
     this.root.add(body);
-    if (this.isAlarm) this.ringMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffb347, emissiveIntensity: 2 });
+    if (this.isAlarm || o.tint !== undefined) this.ringMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: o.tint ?? 0xffb347, emissiveIntensity: 2 });
+    this.bolt = o.bolt ?? 'drone';
     const ring = new THREE.Mesh(kit.ring, this.ringMat ?? kit.trim);
     ring.rotation.x = Math.PI / 2;
     this.root.add(ring);
@@ -344,7 +356,7 @@ export class Drone implements Enemy {
     const charge = this.chargeT >= 0 ? 1 - this.chargeT / CHARGE_TIME : 0;
     this.eyeMat.emissiveIntensity = this.flashT > 0 ? 12 : 3 + charge * 9;
     this.root.scale.setScalar(1 + charge * 0.12);
-    if (this.ringMat) this.ringMat.emissiveIntensity = this.state === 'combat' && !this.alarmed ? (Math.sin(t * 14) > 0 ? 6 : 0.5) : 2;
+    if (this.ringMat && this.isAlarm) this.ringMat.emissiveIntensity = this.state === 'combat' && !this.alarmed ? (Math.sin(t * 14) > 0 ? 6 : 0.5) : 2;
   }
 
   private updateFiring(dt: number, sees: boolean, env: CombatEnv): void {
@@ -357,7 +369,7 @@ export class Drone implements Enemy {
           _want.copy(env.player.pos).setY(env.player.pos.y + 1.1);
           _want.x += (Math.random() - 0.5) * 0.6;
           _want.z += (Math.random() - 0.5) * 0.6;
-          env.bolts.drone.fire(this.root.position, _want);
+          env.bolts[this.bolt].fire(this.root.position, _want);
         }
         this.fireT = 1.4 + Math.random() * 0.9;
       }

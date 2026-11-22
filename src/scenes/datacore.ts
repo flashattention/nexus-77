@@ -1,6 +1,7 @@
 // @ts-nocheck — ported from the design-canvas demos; add types gradually (see CLAUDE.md).
 import type { SceneKit } from '../engine/SceneKit';
 import type { SceneCtx } from '../engine/types';
+import { buildCh5Map } from './datacorePlay';
 
 export function buildDatacore(kit: SceneKit, ctx: SceneCtx): void {
   const T = ctx.T, S = ctx.scene;
@@ -12,6 +13,12 @@ export function buildDatacore(kit: SceneKit, ctx: SceneCtx): void {
   const add = (o) => { S.add(o); return o; };
   const lineM = (c, op) => new T.LineBasicMaterial({ color: c, transparent: true, opacity: op || 0.9, toneMapped: false });
 
+  // Play mode: the Ch5 data-core route replaces the showcase plaza (see datacorePlay.ts).
+  if (ctx.mode === 'play') {
+    const props = new T.Group(); S.add(props);
+    buildCh5Map(kit, ctx, props);
+    kit.bake(ctx, props);
+  } else {
   // void floor: dark mirror + two grids
   const fl = M(new T.PlaneGeometry(80, 80), new T.MeshStandardMaterial({ color: 0x07030f, metalness: 0.9, roughness: 0.25 }), 0, 0, -10); fl.rotation.x = -Math.PI / 2;
   const g1 = add(new T.GridHelper(80, 40, 0x9b5cff, 0x9b5cff)); g1.position.set(0, 0.01, -10); g1.material.transparent = true; g1.material.opacity = 0.5;
@@ -60,13 +67,22 @@ export function buildDatacore(kit: SceneKit, ctx: SceneCtx): void {
   }
   kit.holo(ctx, { text: 'NEXUS//NET', cw: 768, ch: 160, font: 100, w: 4.4, h: 0.92, x: 5.5, y: 6.4, z: -12, ry: -0.25, color: '#9b5cff', bg: 'rgba(30,0,60,0.4)', ink: '#e6d8ff', flicker: true });
 
+    ctx.up.push((t) => {
+      for (let i = 0; i < n; i++) { let y = pos[i * 3 + 1] - spd[i] * 0.02; if (y < 0) y += 14; pos[i * 3 + 1] = y; }
+      pg.attributes.position.needsUpdate = true;
+      c1.rotation.set(t * 0.1, t * 0.15, 0); c2.rotation.set(-t * 0.2, t * 0.25, 0); c3.scale.setScalar(1 + Math.sin(t * 2) * 0.08); halo.rotation.z = t * 0.3;
+      cubes.forEach(([c, y, p]) => { c.position.y = y + Math.sin(t + p) * 0.3; c.rotation.set(t * 0.5 + p, t * 0.4, 0); });
+      scanners.forEach((s) => { const k = (t * s.userData.sp + s.userData.ph) % 1; s.position.y = k * s.userData.h; s.material.opacity = 0.9 * (1 - k); });
+      pad2.rotation.z = t * 0.4;
+    });
+  }
+
   // ---------- hero: ECHO, AI avatar ----------
   const holoM = new T.MeshStandardMaterial({ color: 0x0a1a2a, emissive: 0x00d8ff, emissiveIntensity: 1.1, transparent: true, opacity: 0.55, roughness: 0.3, depthWrite: false });
   const holoV = new T.MeshStandardMaterial({ color: 0x1a0a2a, emissive: 0x9b5cff, emissiveIntensity: 1.3, transparent: true, opacity: 0.6, roughness: 0.3, depthWrite: false });
   const H = kit.humanoid(ctx, { bulk: 0.92, body: holoM, armor: holoV, skin: holoM, legs: holoM, boots: holoV, fore: holoM, hands: holoV });
   const K = H.root; K.position.set(1.9, 0.18, 0.2); K.rotation.y = -0.4; S.add(K); ctx.hero = K;
-  // v0.2: free-walk area only; the chapter layout comes in v0.4/v0.5 (docs/ROADMAP.md).
-  kit.playArea(ctx, { minX: -8, maxX: 9, minZ: -12, maxZ: 9, spawn: [0.4, 0, 6.5] });
+
   // wire overlay
   const wireM = new T.MeshBasicMaterial({ color: 0x9fefff, wireframe: true, transparent: true, opacity: 0.35, toneMapped: false });
   const overlays = [];
@@ -90,12 +106,6 @@ export function buildDatacore(kit: SceneKit, ctx: SceneCtx): void {
   kit.sparkles(ctx, { count: 80, color: 0xd8c4ff, size: 0.05, x0: 0.6, x1: 3.2, y0: 0.2, y1: 3, z0: -0.8, z1: 1.2, seed: 21 });
 
   ctx.up.push((t) => {
-    for (let i = 0; i < n; i++) { let y = pos[i * 3 + 1] - spd[i] * 0.02; if (y < 0) y += 14; pos[i * 3 + 1] = y; }
-    pg.attributes.position.needsUpdate = true;
-    c1.rotation.set(t * 0.1, t * 0.15, 0); c2.rotation.set(-t * 0.2, t * 0.25, 0); c3.scale.setScalar(1 + Math.sin(t * 2) * 0.08); halo.rotation.z = t * 0.3;
-    cubes.forEach(([c, y, p]) => { c.position.y = y + Math.sin(t + p) * 0.3; c.rotation.set(t * 0.5 + p, t * 0.4, 0); });
-    scanners.forEach((s) => { const k = (t * s.userData.sp + s.userData.ph) % 1; s.position.y = k * s.userData.h; s.material.opacity = 0.9 * (1 - k); });
-    pad2.rotation.z = t * 0.4;
     K.position.y = 0.18 + Math.sin(t * 1.5) * 0.06;
     const k2 = (t * 0.4) % 1; scan.position.y = k2 * 2.5; scan.material.opacity = 0.6 * Math.sin(k2 * Math.PI);
     holoM.opacity = 0.5 + Math.sin(t * 13) * 0.04 + (Math.sin(t * 3.1) > 0.98 ? -0.3 : 0);

@@ -6,7 +6,7 @@
 
 - 사이버펑크 3D 웹 게임. three.js r187 + Vite + TypeScript. 나중에 Capacitor로 모바일 이식.
 - 1인칭 FPS 스토리 게임 「NEXUS-77: 오버라이드」. 챕터(구역)마다 다른 주인공 5명.
-- 현재 v0.4(Ch1–3) 완료, 다음 목표는 `docs/ROADMAP.md`의 v0.5(Ch4·Ch5·엔딩)다.
+- 현재 v0.5(Ch1–5 + 엔딩 3종) 완료, 다음 목표는 `docs/ROADMAP.md`의 v0.6(폴리싱·성능)이다.
 - 작업을 마치면 빌드 통과 후 커밋하고 `https://github.com/flashattention/nexus-77`(origin)에 푸시한다.
 - 기획은 `docs/GAME_DESIGN.md`(v0.2 확정). 기획에서 벗어나는 변경은 사용자에게 먼저 확인한다.
 - UI 문구는 한국어로 쓴다. 코드 주석과 식별자는 영어로 쓴다.

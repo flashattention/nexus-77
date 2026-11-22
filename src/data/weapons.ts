@@ -1,7 +1,7 @@
 /** Weapon + gadget catalogue (game data). UI strings are Korean. */
 
-export type FireMode = 'auto' | 'semi' | 'burst' | 'shotgun';
-export type WeaponModel = 'smg' | 'pistol' | 'shotgun' | 'rifle' | 'revolver';
+export type FireMode = 'auto' | 'semi' | 'burst' | 'shotgun' | 'charge';
+export type WeaponModel = 'smg' | 'pistol' | 'shotgun' | 'rifle' | 'revolver' | 'emp' | 'lance';
 
 export interface WeaponDef {
   id: string;
@@ -33,6 +33,12 @@ export interface WeaponDef {
   burstDelay?: number;
   /** Headshot multiplier. */
   headMult: number;
+  /** Damage multiplier against machines (drones, turrets, androids). */
+  machineMult?: number;
+  /** Charge weapons: seconds to full charge; damage scales 0.35..1 with charge. */
+  chargeTime?: number;
+  /** The shot passes through every target on the line (up to the first wall). */
+  pierce?: boolean;
   /** Viewmodel accent colour. */
   accent: number;
 }
@@ -69,6 +75,18 @@ export const WEAPONS: Record<string, WeaponDef> = {
     id: 'buddies', name: '버디스', kind: '산탄총', mode: 'shotgun', model: 'shotgun',
     damage: 14, rpm: 85, mag: 8, reserve: 32, maxReserve: 56, reloadTime: 2.3, pellets: 8,
     spreadMin: 3.8, spreadMax: 4.8, spreadPerShot: 0, spreadRecover: 4, recoil: 0.055, range: 24, headMult: 1.4, accent: 0x9fe8ff,
+  },
+  // Ch4 — Glitch's EMP bolt pistol: weak on people, shreds machines.
+  volt: {
+    id: 'volt', name: '볼트', kind: 'EMP 권총', mode: 'semi', model: 'emp',
+    damage: 17, rpm: 260, mag: 10, reserve: Infinity, maxReserve: Infinity, reloadTime: 1.2,
+    spreadMin: 0.3, spreadMax: 2.4, spreadPerShot: 0.7, spreadRecover: 10, recoil: 0.02, range: 55, headMult: 1.8, machineMult: 2.2, accent: 0x39ff88,
+  },
+  // Ch5 — Echo's data lance: hold to charge, release a piercing beam.
+  lance: {
+    id: 'lance', name: '데이터 랜스', kind: '차지 레이저', mode: 'charge', model: 'lance',
+    damage: 120, rpm: 100, mag: 8, reserve: Infinity, maxReserve: Infinity, reloadTime: 1.4, chargeTime: 0.9, pierce: true,
+    spreadMin: 0, spreadMax: 0.4, spreadPerShot: 0, spreadRecover: 6, recoil: 0.035, range: 90, headMult: 1.5, accent: 0xc4a0ff,
   },
 };
 

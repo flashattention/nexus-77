@@ -19,7 +19,9 @@ import type { Boss, BoltKind, CombatEnv, Enemy } from './ai/types';
 import { FigureKit } from './actors/Figure';
 import type { Npc } from './actors/Npc';
 import type { Companion } from './actors/Companion';
-import { Ability } from './player/Ability';
+import { Ability, PULSE_RADIUS } from './player/Ability';
+import { Beam } from './ai/Beam';
+import type { CompanionEnv } from './actors/Companion';
 import { RailRide, type RideSpec } from './player/RailRide';
 import { Pickups, pickupLabel, type Pickup } from './Pickups';
 import { Hud, type ObjectiveView } from './ui/Hud';
@@ -57,7 +59,20 @@ const IDLE_INPUT: InputState = {
   moveX: 0, moveY: 0, lookX: 0, lookY: 0, fire: false, jump: false, dash: false, reload: false, pause: false,
   use: false, useHeld: false, slot: -1, cycle: 0, grenade: false, gadget: false, lane: 0,
 };
-const BOLT_KINDS: BoltKind[] = ['drone', 'gang', 'viper', 'helix', 'heavy'];
+const BOLT_KINDS: BoltKind[] = ['drone', 'gang', 'viper', 'helix', 'heavy', 'flame', 'data'];
+/** Generic hack (machines turned allies by Glitch's pulse). */
+const HACK_TIME = 8;
+const HACK_MAX = 3;
+const HACK_RANGE = 22;
+const HACK_DAMAGE = 12;
+
+/** Extra per-frame actors owned by the script (Bit). */
+export interface Actor {
+  update(dt: number, t: number, env: CompanionEnv): void;
+  remove(): void;
+}
+
+interface Hack { t: number; fireT: number; beam: Beam; ring: THREE.Mesh }
 const HAZARD_PAD = 0.42;
 const GANG_AMMO_DROP = 0.35;
 const CULL_R2 = 36 * 36;
@@ -104,6 +119,12 @@ export class Game implements FrameDriver, DirectorHost {
   private ability: Ability;
   private rideObj: RailRide | null = null;
   private companions: Companion[] = [];
+  private actors: Actor[] = [];
+  private hacked = new Map<Enemy, Hack>();
+  private hackPool: Array<{ beam: Beam; ring: THREE.Mesh }> = [];
+  private hackRingGeo: THREE.TorusGeometry | null = null;
+  private hackRingMat: THREE.MeshBasicMaterial | null = null;
+  private targetBuf: Enemy[] = [];
   private hazardCd = 0;
   private hazardWarned = false;
   private feedT = 0;
@@ -138,8 +159,11 @@ export class Game implements FrameDriver, DirectorHost {
       viper: new Bolts(this.scene, { color: 0x9fe8ff, speed: 30, damage: 13, size: 0.06 }, 12),
       helix: new Bolts(this.scene, { color: 0x8fd8ff, speed: 28, damage: 8, size: 0.055 }, 32),
       heavy: new Bolts(this.scene, { color: 0xff8a3b, speed: 26, damage: 11, size: 0.09 }, 32),
+      flame: new Bolts(this.scene, { color: 0xff7a1a, speed: 12, damage: 5, size: 0.14, life: 0.95 }, 40),
+      data: new Bolts(this.scene, { color: 0xc4a0ff, speed: 18, damage: 9, size: 0.08 }, 48),
     };
-    this.ability = new Ability(chapter.ability.kind, chapter.ability.cooldown, cam, this.player);
+    this.ability = new Ability(chapter.ability.kind, chapter.ability.cooldown, cam, this.player, this.scene, this.world);
+    this.player.airJumps = chapter.doubleJump ? 1 : 0;
     this.env = {
       world: this.world,
       player: this.player,
@@ -202,10 +226,14 @@ export class Game implements FrameDriver, DirectorHost {
         this.player.update(dt, pin);
       }
       if (this.lookAt) this.player.lookToward(this.lookAt, dt, 3.5);
-      const targets = this.enemies;
+      // Hacked machines are allies for now: not something to shoot at.
+      const targets = this.targetBuf;
+      targets.length = 0;
+      for (const e of this.enemies) if (!this.hacked.has(e)) targets.push(e);
       this.ability.update(dt, abilityPressed && live && this.player.alive, targets, this.sparks);
       // Overdrive slows the world (enemies, bolts, sparks), not the player or the script clock.
       const wdt = dt * this.ability.timeScale;
+      if (this.ability.takePulse()) this.applyPulse();
       if (live && this.player.alive) {
         this.arsenal.update(dt, inp.state, this.player, this.world, targets, this.sparks, inp.touchMode, {
           onHit: (kill, head) => this.hud.hitMarker(kill, head),
@@ -228,7 +256,9 @@ export class Game implements FrameDriver, DirectorHost {
       });
       const eye = this.player.eye;
       for (const e of this.enemies) {
-        e.update(wdt, t, this.env);
+        const h = this.hacked.get(e);
+        if (h) this.updateHacked(e, h, wdt);
+        else e.update(wdt, t, this.env);
         // Distance cull: fog makes anything past ~35 m invisible, so skip its draw calls.
         if (e.root.parent === this.scene) e.root.visible = e.root.position.distanceToSquared(eye) < CULL_R2;
       }
@@ -242,6 +272,7 @@ export class Game implements FrameDriver, DirectorHost {
       }
       const cenv = { world: this.world, player: this.player, sparks: this.sparks, targets };
       for (const c of this.companions) c.update(dt, t, cenv);
+      for (const a of this.actors) a.update(dt, t, cenv);
       this.pickups.update(dt, t, this.player.pos, (p) => this.collect(p));
       this.sparks.update(wdt);
       this.updateHazards(dt);
@@ -278,6 +309,8 @@ export class Game implements FrameDriver, DirectorHost {
       marker: this.projectMarker(),
     });
     this.hud.root.classList.toggle('overdrive', this.ability.kind === 'overdrive' && this.ability.active);
+    this.hud.root.classList.toggle('pulsing', this.ability.kind === 'pulse' && this.ability.active);
+    this.hud.root.classList.toggle('phasing', this.ability.kind === 'phase' && this.ability.active);
     this.hud.root.classList.toggle('need-lock', this.state === 'play' && !this.cinematic && !inp.touchMode && !inp.locked);
     inp.endFrame();
   }
@@ -291,6 +324,12 @@ export class Game implements FrameDriver, DirectorHost {
     this.ability.dispose();
     for (const c of this.companions) c.remove();
     this.companions = [];
+    for (const a of this.actors) a.remove();
+    this.actors = [];
+    for (const h of this.hackPool) { h.beam.dispose(); h.ring.removeFromParent(); }
+    for (const h of this.hacked.values()) { h.beam.dispose(); h.ring.removeFromParent(); }
+    this.hackRingGeo?.dispose();
+    this.hackRingMat?.dispose();
     // Shared kits: meshes that already left the scene still reference them.
     this.figureKit.dispose();
     this.droneKit.dispose();
@@ -302,6 +341,7 @@ export class Game implements FrameDriver, DirectorHost {
 
   addEnemy(e: Enemy): void { this.enemies.push(e); }
   clearEnemies(): void {
+    for (const e of [...this.hacked.keys()]) this.unhack(e);
     for (const e of this.enemies) if (!e.gone) e.despawn();
     this.enemies = [];
     for (const k of BOLT_KINDS) this.bolts[k].clear();
@@ -376,6 +416,19 @@ export class Game implements FrameDriver, DirectorHost {
   }
 
   addCompanion(c: Companion): void { this.companions.push(c); }
+  addActor(a: Actor): void { this.actors.push(a); }
+  removeActor(a: Actor): void { this.actors = this.actors.filter((x) => x !== a); }
+
+  persist(key: string, value: number): void {
+    this.progress.stats[key] = value;
+    saveProgress(this.progress);
+  }
+  persisted(key: string): number { return this.progress.stats[key] ?? 0; }
+  get allFragments(): readonly string[] { return this.progress.fragments; }
+  recordEnding(id: string): void {
+    if (!this.progress.endings.includes(id)) this.progress.endings.push(id);
+    saveProgress(this.progress);
+  }
   removeCompanion(c: Companion): void { this.companions = this.companions.filter((x) => x !== c); }
 
   teleport(p: THREE.Vector3, yaw: number): void {
@@ -414,6 +467,87 @@ export class Game implements FrameDriver, DirectorHost {
   }
 
   // ---------- systems ----------
+
+  /** Glitch's hack pulse: rescue residents, open boss vents, turn machines into allies. */
+  private applyPulse(): void {
+    const p = this.player.pos;
+    let hacked = 0, rescued = 0, special = false;
+    const near = this.enemies
+      .filter((e) => e.alive && !this.hacked.has(e) && Math.hypot(e.hitCenter.x - p.x, e.hitCenter.z - p.z) < PULSE_RADIUS && Math.abs(e.hitCenter.y - p.y) < 8)
+      .sort((a, b) => a.hitCenter.distanceToSquared(p) - b.hitCenter.distanceToSquared(p));
+    for (const e of near) {
+      if (e.onPulse) {
+        const r = e.onPulse();
+        if (r === 'rescued') { rescued++; this.sparks.burst(e.hitCenter, 14, 0x9fffc4, 3); }
+        else if (r === 'hacked') special = true;
+        continue;
+      }
+      if (!e.machine || 'bossName' in e || hacked >= HACK_MAX) continue;
+      this.hack(e);
+      hacked++;
+    }
+    const parts: string[] = [];
+    if (hacked) parts.push(`${hacked}기 해킹 — ${HACK_TIME}초간 아군`);
+    if (rescued) parts.push(`주민 ${rescued}명 칩 신호 차단`);
+    if (parts.length) this.hud.toast(parts.join(' · '));
+    else if (!special) this.hud.toast('해킹 펄스 — 범위 안에 대상이 없다');
+  }
+
+  private hack(e: Enemy): void {
+    if (!this.hackRingGeo) {
+      this.hackRingGeo = new THREE.TorusGeometry(0.45, 0.03, 4, 24);
+      this.hackRingMat = new THREE.MeshBasicMaterial({ color: 0x39ff88, toneMapped: false });
+    }
+    let fx = this.hackPool.pop();
+    if (!fx) {
+      const ring = new THREE.Mesh(this.hackRingGeo, this.hackRingMat!);
+      ring.rotation.x = Math.PI / 2;
+      fx = { beam: new Beam(this.scene, 0x39ff88, 0.02), ring };
+    }
+    this.scene.add(fx.ring);
+    this.hacked.set(e, { t: HACK_TIME, fireT: 0.4, ...fx });
+    this.sparks.burst(e.hitCenter, 16, 0x39ff88, 3);
+  }
+
+  private unhack(e: Enemy): void {
+    const h = this.hacked.get(e);
+    if (!h) return;
+    this.hacked.delete(e);
+    h.beam.hide();
+    h.ring.removeFromParent();
+    this.hackPool.push({ beam: h.beam, ring: h.ring });
+  }
+
+  /** A hacked machine fights for the player, then burns out when the hack ends. */
+  private updateHacked(e: Enemy, h: Hack, dt: number): void {
+    if (!e.alive) { this.unhack(e); return; }
+    h.t -= dt;
+    h.ring.position.set(e.hitCenter.x, e.hitCenter.y + 0.75, e.hitCenter.z);
+    h.ring.rotation.z += dt * 4;
+    if (h.t <= 0) {
+      this.unhack(e);
+      this.sparks.burst(e.hitCenter, 20, 0x39ff88, 4);
+      e.damage(99999, e.hitCenter); // overloaded: shuts down for good
+      return;
+    }
+    h.fireT -= dt;
+    if (h.fireT > 0.45) return;
+    h.beam.hide();
+    if (h.fireT > 0) return;
+    h.fireT = 0.6;
+    let best: Enemy | null = null, bd = HACK_RANGE;
+    for (const o of this.enemies) {
+      if (o === e || !o.alive || this.hacked.has(o) || 'rescued' in o) continue; // never shoots residents
+      const d = o.hitCenter.distanceTo(e.hitCenter);
+      if (d < bd && this.world.lineOfSight(e.hitCenter, o.hitCenter)) { bd = d; best = o; }
+    }
+    if (!best) return;
+    best.damage(HACK_DAMAGE * (best.machine ? 1.5 : 1), best.hitCenter);
+    this.sparks.burst(best.hitCenter, 5, 0x39ff88, 3);
+    h.beam.show(e.hitCenter, best.hitCenter, 0.9, 1.5);
+    // Face the target (cosmetic).
+    e.root.rotation.y = Math.atan2(-(best.hitCenter.x - e.hitCenter.x), -(best.hitCenter.z - e.hitCenter.z));
+  }
 
   private updateInteract(dt: number, inp: InputState): void {
     // Nearest usable thing roughly in front of the player.
@@ -617,15 +751,16 @@ export class Game implements FrameDriver, DirectorHost {
     const acc = a.shots ? Math.round((a.hits / a.shots) * 100) : 0;
     const frags = Object.keys(this.chapter.fragments);
     const got = frags.filter((k) => this.progress.fragments.includes(k)).length;
+    const custom = won ? this.chapter.outroFor?.(this.flags) : undefined;
     if (won) {
       if (!this.progress.cleared.includes(this.chapter.id)) this.progress.cleared.push(this.chapter.id);
       delete this.progress.checkpoints[this.chapter.id];
       saveProgress(this.progress);
     }
     this.hud.showScreen({
-      kicker: won ? `CHAPTER ${pad(this.chapter.no)} COMPLETE` : 'MISSION FAILED',
-      title: won ? `${this.chapter.title} — 완료` : '작전 실패',
-      sub: won ? this.chapter.outro : `${this.chapter.hero}가 쓰러졌다. 체크포인트 「${this.chapter.stages[this.stage].name}」에서 다시 시작한다.`,
+      kicker: won ? custom?.kicker ?? `CHAPTER ${pad(this.chapter.no)} COMPLETE` : 'MISSION FAILED',
+      title: won ? custom?.title ?? `${this.chapter.title} — 완료` : '작전 실패',
+      sub: won ? custom?.text ?? this.chapter.outro : `${this.chapter.hero}가 쓰러졌다. 체크포인트 「${this.chapter.stages[this.stage].name}」에서 다시 시작한다.`,
       lines: [
         ['소요 시간', formatTime(this.elapsed)],
         ['제압', `${this.downs}`],

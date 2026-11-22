@@ -30,6 +30,17 @@ export const SPEAKERS = {
   detainee: { name: '피의자', color: '#c3bbdc' },
   guard: { name: '헬릭스 경비', color: '#6fb6ff' },
   system: { name: 'SYSTEM', color: '#c3bbdc' },
+  // Ch4
+  bit: { name: '비트', color: '#ffb347' },
+  lu: { name: '마담 루', color: '#ff8a2b' },
+  toby: { name: '토비', color: '#ffd36b' },
+  sweeper: { name: '정화 부대', color: '#ffd36b' },
+  resident: { name: '주민', color: '#9fffc4' },
+  // Ch5
+  echoAi: { name: '에코', color: '#c4a0ff' },
+  halo: { name: 'HALO', color: '#ff3b5c' },
+  architect: { name: '아키텍트', color: '#e6e6e6' },
+  memory: { name: '시민의 기억', color: '#a0ffd8' },
 } satisfies Record<string, Speaker>;
 
 export type SpeakerId = keyof typeof SPEAKERS;

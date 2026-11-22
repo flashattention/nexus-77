@@ -2,11 +2,13 @@ import type { ChapterDef } from './types';
 import { CH1 } from './ch1';
 import { CH2 } from './ch2';
 import { CH3 } from './ch3';
+import { CH4 } from './ch4';
+import { CH5 } from './ch5';
 
 export type { ChapterDef } from './types';
 
-/** Playable chapters in story order. CH4–CH5 arrive in v0.5 (docs/ROADMAP.md). */
-export const CHAPTERS: ChapterDef[] = [CH1, CH2, CH3];
+/** Playable chapters in story order. */
+export const CHAPTERS: ChapterDef[] = [CH1, CH2, CH3, CH4, CH5];
 
 export function chapterForDistrict(districtId: string): ChapterDef | undefined {
   return CHAPTERS.find((c) => c.districtId === districtId);

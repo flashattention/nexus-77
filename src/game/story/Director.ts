@@ -11,7 +11,14 @@ import { Gangster, type GangOpts } from '../ai/Gangster';
 import { Viper } from '../ai/Viper';
 import { Turret, type TurretKit, type TurretOpts } from '../ai/Turret';
 import { Mech } from '../ai/Mech';
-import { Crow } from '../ai/Crow';
+import { Crow, type CrowOpts } from '../ai/Crow';
+import { Spider, type SpiderOpts } from '../ai/Spider';
+import { Hollowed } from '../ai/Hollowed';
+import { Grinder } from '../ai/Grinder';
+import { Mirror, type MirrorKind } from '../ai/Mirror';
+import { Halo } from '../ai/Halo';
+import { Bit } from '../actors/Bit';
+import type { Rect } from '../../engine/types';
 import { Albatross } from '../ai/Albatross';
 import { Rider, Truck, type RiderOpts, type VehicleKit } from '../ai/Vehicles';
 import type { Boss, Enemy } from '../ai/types';
@@ -73,6 +80,21 @@ export interface DirectorHost {
   /** Move the player (and following companions) instantly. */
   teleport(p: THREE.Vector3, yaw: number): void;
   upgradeWeapon(id: string, patch: Partial<WeaponDef>): void;
+  addActor(a: { update(dt: number, t: number, env: import('../actors/Companion').CompanionEnv): void; remove(): void }): void;
+  removeActor(a: { update(dt: number, t: number, env: import('../actors/Companion').CompanionEnv): void; remove(): void }): void;
+  /** Cross-chapter numbers kept in the save (Ch4 rescues). */
+  persist(key: string, value: number): void;
+  persisted(key: string): number;
+  /** Every memory fragment collected in any chapter. */
+  readonly allFragments: readonly string[];
+  recordEnding(id: string): void;
+}
+
+export interface BitHandle {
+  readonly bit: Bit;
+  /** Send Bit to a point (null = back to the shoulder). */
+  fly(at: string | THREE.Vector3 | null): void;
+  remove(): void;
 }
 
 export interface CompanionSpec {
@@ -353,10 +375,57 @@ export class Director {
     return m;
   }
 
-  crow(at: Vec3T): Crow {
-    const c = new Crow(this.host.scene, this.host.figureKit, at);
+  crow(at: Vec3T, o?: CrowOpts): Crow {
+    const c = new Crow(this.host.scene, this.host.figureKit, at, o);
     this.host.addEnemy(c);
     return c;
+  }
+
+  spiders(list: Array<{ at: Vec3T } & SpiderOpts>): Spider[] {
+    return list.map((s) => {
+      const sp = new Spider(this.host.scene, this.host.droneKit, s.at, s);
+      this.host.addEnemy(sp);
+      return sp;
+    });
+  }
+
+  /** Infected residents (rescued with the hack pulse). */
+  hollowed(list: Array<{ at: Vec3T; variant?: number; aggressive?: boolean }>): Hollowed[] {
+    return list.map((s, i) => {
+      const h = new Hollowed(this.host.scene, this.host.figureKit, s.at, s.variant ?? i, s.aggressive);
+      this.host.addEnemy(h);
+      return h;
+    });
+  }
+
+  grinder(at: Vec3T, arena: Rect): Grinder {
+    const g = new Grinder(this.host.scene, at, arena);
+    this.host.addEnemy(g);
+    return g;
+  }
+
+  mirror(kind: MirrorKind, at: Vec3T, spots: Vec3T[] = []): Mirror {
+    const m = new Mirror(this.host.scene, this.host.figureKit, kind, at, spots);
+    this.host.addEnemy(m);
+    return m;
+  }
+
+  /** The final boss and its four phase-1 nodes. */
+  halo(cx: number, cz: number, radius: number): Halo {
+    const h = new Halo(this.host.scene, this.host.figureKit, cx, cz, radius);
+    this.host.addEnemy(h);
+    for (const n of h.nodes) this.host.addEnemy(n);
+    return h;
+  }
+
+  bit(at: string): BitHandle {
+    const b = new Bit(this.host.scene, this.host.droneKit, this.anchor(at));
+    this.host.addActor(b);
+    return {
+      bit: b,
+      fly: (to) => b.fly(to === null ? null : this.pos(to)),
+      remove: () => { this.host.removeActor(b); b.remove(); },
+    };
   }
 
   /** The gunship and its four engine targets (needs an active ride). */
@@ -418,6 +487,12 @@ export class Director {
   // ---------- player tweaks ----------
 
   get player(): FPSController { return this.host.player; }
+
+  persist(key: string, value: number): void { this.host.persist(key, value); }
+  persisted(key: string): number { return this.host.persisted(key); }
+  /** Memory fragments collected across the whole campaign. */
+  get fragments(): readonly string[] { return this.host.allFragments; }
+  ending(id: string): void { this.setFlag(`ending:${id}`); this.host.recordEnding(id); }
   upgrade(id: string, patch: Partial<WeaponDef>): void { this.host.upgradeWeapon(id, patch); }
 
   /** Resolves when every enemy in the list is down; `onProgress(down, total)` on each change. */

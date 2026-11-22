@@ -107,6 +107,7 @@ export class Gangster implements Enemy {
   }
 
   get alive(): boolean { return this.state !== 'down' && this.state !== 'gone'; }
+  get machine(): boolean { return this.robot; }
   get gone(): boolean { return this.state === 'gone'; }
 
   damage(n: number, _at: THREE.Vector3): boolean {

@@ -59,8 +59,13 @@ export class FPSController {
   /** Extra FOV (overdrive, speed). */
   fovBoost = 0;
   shield: ShieldState | null = null;
+  /** Extra jumps allowed in the air (Echo's double jump). */
+  airJumps = 0;
+  /** Seconds of invulnerability left from a phase shift. */
+  phaseT = 0;
 
   private dashT = 0;
+  private airLeft = 0;
   private sinceHit = 99;
   private bob = 0;
   private shake = 0;
@@ -71,7 +76,7 @@ export class FPSController {
   }
 
   get alive(): boolean { return this.hp > 0; }
-  get invulnerable(): boolean { return this.dashT > 0; }
+  get invulnerable(): boolean { return this.dashT > 0 || this.phaseT > 0; }
   get dashReady(): number { return 1 - Math.max(0, this.dashCd) / this.stats.dashCooldown; }
 
   spawn(p: THREE.Vector3, yaw: number): void {
@@ -164,10 +169,16 @@ export class FPSController {
       this.vel.z += (_wish.z * speed - this.vel.z) * k;
     }
 
+    if (this.grounded) this.airLeft = this.airJumps;
     if (inp.jump && this.grounded) {
       this.vel.y = JUMP_V;
       this.grounded = false;
+    } else if (inp.jump && this.airLeft > 0) {
+      this.airLeft--;
+      this.vel.y = JUMP_V * 0.95;
+      this.shake = Math.max(this.shake, 0.05);
     }
+    this.phaseT = Math.max(0, this.phaseT - dt);
     this.vel.y -= GRAVITY * dt;
     this.grounded = this.world.moveCylinder(this.pos, this.vel, dt, RADIUS, HEIGHT, STEP_UP);
 
@@ -206,7 +217,7 @@ export class FPSController {
     this.cam.position.set(this.eye.x + (Math.random() - 0.5) * sh, this.eye.y + bobY + (Math.random() - 0.5) * sh, this.eye.z);
     this.cam.rotation.set(this.pitch + this.recoilPitch, this.yaw, Math.sin(this.bob) * 0.004);
 
-    const fov = BASE_FOV + (this.dashT > 0 ? 9 : 0) + this.fovBoost;
+    const fov = BASE_FOV + (this.dashT > 0 || this.phaseT > 0 ? 9 : 0) + this.fovBoost;
     if (Math.abs(this.cam.fov - fov) > 0.05) {
       this.cam.fov += (fov - this.cam.fov) * Math.min(1, dt * 14);
       this.cam.updateProjectionMatrix();

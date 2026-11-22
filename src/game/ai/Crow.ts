@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Figure, type FigureKit } from '../actors/Figure';
+import { Figure, type FigureKit, type FigureLook } from '../actors/Figure';
 import type { Vec3T } from '../../data/chapters/types';
 import type { Boss, CombatEnv, Enemy } from './types';
 
@@ -23,17 +23,25 @@ const _from = new THREE.Vector3();
 const _aim = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
+/** Re-skin for Ch5's mirror Aegis (same fight, different name and colours). */
+export interface CrowOpts {
+  name?: string;
+  hp?: number;
+  look?: FigureLook;
+  shieldColor?: number;
+}
+
 type State = 'intro' | 'advance' | 'blast' | 'wind' | 'charge' | 'recover' | 'stagger' | 'down' | 'gone';
 
 export class Crow implements Enemy, Boss {
-  readonly bossName = '크로우 국장';
+  readonly bossName: string;
   readonly root = new THREE.Group();
   readonly hitCenter = new THREE.Vector3();
   readonly hitRadius = 0.45;
   readonly headCenter = new THREE.Vector3();
   readonly headRadius = 0.19;
-  readonly maxHp = MAX_HP;
-  hp = MAX_HP;
+  readonly maxHp: number;
+  hp: number;
   state: State = 'intro';
   calledSupport = false;
   onHalf?: () => void;
@@ -52,12 +60,17 @@ export class Crow implements Enemy, Boss {
   private flashT = 0;
   private hitPlayer = false;
 
-  constructor(scene: THREE.Scene, kit: FigureKit, at: Vec3T) {
-    this.fig = new Figure(kit, { body: 0x3a4152, legs: 0x1c2230, skin: 0xb8b0a8, accent: 0xff2bd6, bulk: 1.25, gun: true });
+  private color: number;
+
+  constructor(scene: THREE.Scene, kit: FigureKit, at: Vec3T, o: CrowOpts = {}) {
+    this.bossName = o.name ?? '크로우 국장';
+    this.maxHp = this.hp = o.hp ?? MAX_HP;
+    this.color = o.shieldColor ?? 0xff7ad6;
+    this.fig = new Figure(kit, { ...(o.look ?? { body: 0x3a4152, legs: 0x1c2230, skin: 0xb8b0a8, accent: 0xff2bd6, bulk: 1.25 }), gun: true });
     this.root.add(this.fig.root);
     // Hex shield in front of the left arm.
-    this.shieldMat = new THREE.MeshBasicMaterial({ color: 0xff7ad6, transparent: true, opacity: 0.25, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
-    this.edgeMat = new THREE.MeshBasicMaterial({ color: 0xff7ad6, toneMapped: false });
+    this.shieldMat = new THREE.MeshBasicMaterial({ color: this.color, transparent: true, opacity: 0.25, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.edgeMat = new THREE.MeshBasicMaterial({ color: this.color, toneMapped: false });
     const hex = new THREE.CircleGeometry(0.75, 6);
     const edge = new THREE.TorusGeometry(0.75, 0.03, 4, 6);
     this.geos.push(hex, edge);
@@ -92,7 +105,7 @@ export class Crow implements Enemy, Boss {
     }
     this.hp -= n;
     this.flashT = 0.1;
-    if (!this.calledSupport && this.hp < MAX_HP / 2) { this.calledSupport = true; this.onHalf?.(); }
+    if (!this.calledSupport && this.hp < this.maxHp / 2) { this.calledSupport = true; this.onHalf?.(); }
     if (this.hp <= 0) { this.hp = 0; this.state = 'down'; return true; }
     return false;
   }
@@ -211,7 +224,7 @@ export class Crow implements Enemy, Boss {
     env.world.moveCylinder(this.pos, this.vel, dt, 0.32, 1.8, 0.35);
     // A charge that slams into a wall ends early.
     if (this.state === 'charge' && Math.hypot(this.pos.x - px, this.pos.z - pz) < CHARGE_SPEED * dt * 0.3) {
-      env.sparks.burst(this.hitCenter, 16, 0xff7ad6, 4);
+      env.sparks.burst(this.hitCenter, 16, this.color, 4);
       pl.kick(0.2);
       this.state = 'recover';
       this.timer = RECOVER + 0.6;
@@ -230,8 +243,8 @@ export class Crow implements Enemy, Boss {
     this.shieldG.visible = guard || this.state === 'intro';
     this.blockT -= dt;
     const wind = this.state === 'wind' || this.state === 'charge';
-    this.edgeMat.color.setHex(wind ? 0xff3b3b : 0xff7ad6);
-    this.shieldMat.color.setHex(wind ? 0xff3b3b : 0xff7ad6);
+    this.edgeMat.color.setHex(wind ? 0xff3b3b : this.color);
+    this.shieldMat.color.setHex(wind ? 0xff3b3b : this.color);
     this.shieldMat.opacity = this.blockT > 0 ? 0.7 : wind ? 0.35 + 0.25 * Math.abs(Math.sin(t * 16)) : 0.22;
     const crouch = this.state === 'stagger' ? 0.6 : this.state === 'recover' ? 0.3 : 0;
     this.fig.pose(dt, { speed: Math.hypot(this.vel.x, this.vel.z), aim: this.state === 'blast' ? 1 : 0, crouch });

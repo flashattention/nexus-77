@@ -1,11 +1,12 @@
 // @ts-nocheck — ported from the design-canvas demos; add types gradually (see CLAUDE.md).
 import type { SceneKit } from '../engine/SceneKit';
 import type { SceneCtx } from '../engine/types';
+import { buildCh4Map } from './undercityPlay';
 
 export function buildUndercity(kit: SceneKit, ctx: SceneCtx): void {
   const T = ctx.T, S = ctx.scene;
   ctx.r.toneMappingExposure = 1.2;
-  S.fog = new T.FogExp2(0x0c1a12, 0.06);
+  S.fog = new T.FogExp2(0x0c1a12, ctx.mode === 'play' ? 0.038 : 0.06);
   S.environment = kit.envMap(ctx, '#2f6a3c', '#030604');
   S.add(new T.AmbientLight(0x3a5a40, 0.45));
   kit.sun(ctx, 0x7aa88a, 0.7, 3, 9, 4, 9);
@@ -13,6 +14,13 @@ export function buildUndercity(kit: SceneKit, ctx: SceneCtx): void {
   const acid = kit.neon(T, 0x39ff88, 3), orange = kit.neon(T, 0xff8a2b, 3);
   const rust = [0x6a3a24, 0x2f4a4a, 0x5a5230, 0x3a2f4a, 0x7a2f2a];
 
+  // Play mode: the Ch4 B-13 cavern replaces the showcase alley (see undercityPlay.ts).
+  const lamps = [], puffs = [];
+  if (ctx.mode === 'play') {
+    const props = new T.Group(); S.add(props);
+    buildCh4Map(kit, ctx, props);
+    kit.bake(ctx, props);
+  } else {
   // grimy ground + glowing puddles
   const g0 = M(new T.PlaneGeometry(50, 50), new T.MeshStandardMaterial({ color: 0x14140f, metalness: 0.5, roughness: 0.35 }), 0.5, 0, -10);
   g0.rotation.x = -Math.PI / 2;
@@ -52,7 +60,7 @@ export function buildUndercity(kit: SceneKit, ctx: SceneCtx): void {
   kit.holo(ctx, { text: 'B-13', cw: 320, ch: 160, font: 110, w: 1.4, h: 0.7, x: 0, y: 3.9, z: -9.4, color: '#39ff88', bg: 'rgba(0,30,10,0.6)', ink: '#c8ffd9' });
 
   // hanging lamps
-  const lamps = [];
+
   [[-2, -3], [3, -6], [-0.5, -7.5]].forEach(([x, z], i) => {
     M(new T.CylinderGeometry(0.008, 0.008, 3, 4), cab, x, 7.5, z).castShadow = false;
     M(new T.ConeGeometry(0.25, 0.25, 12, 1, true), new T.MeshStandardMaterial({ color: 0x2a2a24, side: T.DoubleSide, metalness: 0.7 }), x, 5.95, z);
@@ -62,11 +70,13 @@ export function buildUndercity(kit: SceneKit, ctx: SceneCtx): void {
   const gl = new T.PointLight(0x39ff88, 10, 0, 2); gl.position.set(-1.5, 1.5, 2); S.add(gl);
 
   // steam vents
-  const puffs = [];
+
   [[-3.4, 0.2, -4.4], [5.2, 0, -2.2]].forEach(([x, y, z], k) => { for (let i = 0; i < 6; i++) { const m = new T.Mesh(new T.IcosahedronGeometry(0.25, 1), new T.MeshStandardMaterial({ color: 0xcfe8d6, transparent: true, opacity: 0.3, depthWrite: false })); S.add(m); puffs.push({ m, x, y, z, ph: i / 6 + k * 0.13 }); } });
   // drips
   kit.rain(ctx, { count: 160, x0: -6, x1: 7, z0: -8, z1: 2, y1: 9.5, color: 0x9fffc4, opacity: 0.4, len: 0.2, seed: 3 });
   kit.sparkles(ctx, { count: 60, color: 0x9fffc4, size: 0.05, x0: -6, x1: 6, y0: 0.3, y1: 6, z0: -8, z1: 2, seed: 12 });
+
+  }
 
   // ---------- hero: GLITCH, hacker ----------
   const jacket = new T.MeshStandardMaterial({ color: 0x4a4a2e, roughness: 0.8 });
@@ -75,8 +85,7 @@ export function buildUndercity(kit: SceneKit, ctx: SceneCtx): void {
   const boots = new T.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.7 });
   const H = kit.humanoid(ctx, { bulk: 1.12, body: jacket, armor: jacket, skin, legs: dark, boots, fore: jacket, hands: dark });
   const K = H.root; K.position.set(1.9, 0, 0.5); K.rotation.y = -0.45; K.scale.setScalar(0.92); S.add(K); ctx.hero = K;
-  // v0.2: free-walk area only; the chapter layout comes in v0.4/v0.5 (docs/ROADMAP.md).
-  kit.playArea(ctx, { minX: -8, maxX: 9, minZ: -12, maxZ: 9, spawn: [0.4, 0, 6.5] });
+
   const Mh = (g, m, x, y, z, p) => kit.mesh(ctx, g, m, x, y, z, p);
   // cable dreads with glowing tips
   const dreads = new T.Group(); dreads.position.set(0, 0.08, -0.02); H.head.add(dreads);

@@ -13,6 +13,8 @@ export interface Target {
   /** Optional head sphere for headshot bonus. */
   readonly headCenter?: THREE.Vector3;
   readonly headRadius?: number;
+  /** Machines take the weapon's `machineMult` bonus. */
+  readonly machine?: boolean;
   /** Returns true if this hit took the target down. */
   damage(n: number, at: THREE.Vector3): boolean;
 }
@@ -69,6 +71,8 @@ export class Arsenal {
   private pending = -1;
   private prevFire = false;
   private burstLeft = 0;
+  /** Charge weapons: 0..1 while the trigger is held. */
+  charge = 0;
   private readonly rig = new THREE.Group();
   private readonly views = new Map<WeaponModel, ViewModel>();
   private readonly flash: THREE.Mesh;
@@ -119,7 +123,8 @@ export class Arsenal {
     return this.reloading > 0 && d ? 1 - this.reloading / d.reloadTime : -1;
   }
 
-  get spreadDeg(): number { return this.spread; }
+  /** Crosshair gap: charge weapons close the crosshair as they charge. */
+  get spreadDeg(): number { return this.def?.mode === 'charge' ? 5 * (1 - this.charge) : this.spread; }
 
   // ---------- inventory ----------
 
@@ -170,6 +175,7 @@ export class Arsenal {
     this.switchT = SWITCH_TIME;
     this.reloading = 0;
     this.burstLeft = 0;
+    this.charge = 0;
   }
 
   cycle(dir: number): void {
@@ -236,9 +242,26 @@ export class Arsenal {
         if (this.autoFire && this.angleTo(t.hitCenter) < AUTOFIRE_CONE) fire = true;
       }
     }
+    const released = this.prevFire && !fire;
     this.prevFire = fire;
 
     const ready = this.reloading === 0 && this.switchT === 0 && this.cooldown <= 0;
+    if (d.mode === 'charge') {
+      // Hold to charge, release to fire (a tap still fires a weak shot).
+      if (fire && ready && slot.ammo > 0) this.charge = Math.min(1, this.charge + dt / (d.chargeTime ?? 1));
+      else if (fire && ready && slot.ammo <= 0 && slot.reserve > 0) this.startReload(slot);
+      if (released && this.charge > 0) {
+        const k = 0.35 + 0.65 * this.charge;
+        this.charge = 0;
+        if (ready && slot.ammo > 0) {
+          this.fire(slot, player, world, targets, sparks, touch, ev, k);
+          if (slot.ammo === 0 && slot.reserve > 0) this.startReload(slot);
+        }
+      }
+      if (this.reloading > 0 || this.switchT > 0) this.charge = 0;
+      this.animate(dt, player, inp);
+      return;
+    }
     // Every mode fires while held, at the weapon's own rate (semi-auto weapons
     // just have a low rpm). Burst weapons fire a whole burst per cycle.
     let trigger: boolean;
@@ -281,7 +304,7 @@ export class Arsenal {
     this.burstLeft = 0;
   }
 
-  private fire(slot: Slot, player: FPSController, world: World, targets: readonly Target[], sparks: Sparks, touch: boolean, ev: ShotEvents): void {
+  private fire(slot: Slot, player: FPSController, world: World, targets: readonly Target[], sparks: Sparks, touch: boolean, ev: ShotEvents, power = 1): void {
     const d = slot.def;
     this.cooldown = Math.max(this.cooldown, 60 / d.rpm);
     slot.ammo--;
@@ -298,6 +321,31 @@ export class Arsenal {
       _dir.set(Math.sin(a) * Math.cos(th), Math.sin(a) * Math.sin(th), -Math.cos(a)).applyQuaternion(this.cam.quaternion);
 
       const wallDist = world.raycast(origin, _dir, d.range);
+      if (d.pierce) {
+        // Piercing beam: every target on the line up to the wall takes the hit.
+        _ray.set(origin, _dir);
+        const scale = touch ? TOUCH_HIT_SCALE : 1;
+        for (const t of targets) {
+          if (!t.alive) continue;
+          let head = false;
+          if (t.headCenter && t.headRadius) {
+            _sphere.set(t.headCenter, t.headRadius * (touch ? 1.15 : 1));
+            head = !!_ray.intersectSphere(_sphere, _hit) && _hit.distanceTo(origin) < wallDist;
+          }
+          if (!head) {
+            _sphere.set(t.hitCenter, t.hitRadius * scale);
+            if (!_ray.intersectSphere(_sphere, _hit) || _hit.distanceTo(origin) >= wallDist) continue;
+          }
+          // Pass the real entry point (shields check which side was hit).
+          const kill = t.damage(d.damage * power * (head ? d.headMult : 1) * (t.machine ? d.machineMult ?? 1 : 1), _hit);
+          sparks.burst(_hit, 8, d.accent, 4);
+          anyHit = true; anyKill ||= kill; anyHead ||= head;
+        }
+        _hit.copy(origin).addScaledVector(_dir, wallDist);
+        if (wallDist < d.range) sparks.burst(_hit, 8, d.accent, 3);
+        this.tracer(_muzzle, _hit, d.accent, 2 + power * 4);
+        continue;
+      }
       let best: Target | null = null, bestDist = wallDist, bestHead = false;
       _ray.set(origin, _dir);
       const scale = touch ? TOUCH_HIT_SCALE : 1;
@@ -319,8 +367,8 @@ export class Arsenal {
       _hit.copy(origin).addScaledVector(_dir, bestDist);
       if (best) {
         const fall = bestDist > d.range * 0.7 ? 0.6 : 1; // damage falls off near max range
-        const kill = best.damage(d.damage * (bestHead ? d.headMult : 1) * fall, _hit);
-        sparks.burst(_hit, bestHead ? 7 : 4, bestHead ? 0xffd36b : 0x9ff6ff, 3.5);
+        const kill = best.damage(d.damage * power * (bestHead ? d.headMult : 1) * fall * (best.machine ? d.machineMult ?? 1 : 1), _hit);
+        sparks.burst(_hit, bestHead ? 7 : 4, bestHead ? 0xffd36b : best.machine && d.machineMult ? 0x39ff88 : 0x9ff6ff, 3.5);
         anyHit = true; anyKill ||= kill; anyHead ||= bestHead;
       } else if (wallDist < d.range) {
         _to.copy(_dir).negate();
@@ -337,15 +385,15 @@ export class Arsenal {
     this.flashT = 0.045;
   }
 
-  private tracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
+  private tracer(from: THREE.Vector3, to: THREE.Vector3, color: number, width = 1): void {
     const tr = this.tracers[this.tracerIdx];
     this.tracerIdx = (this.tracerIdx + 1) % TRACERS;
     _mid.addVectors(from, to).multiplyScalar(0.5);
     tr.mesh.position.copy(_mid);
     tr.mesh.lookAt(to);
-    tr.mesh.scale.set(1, 1, from.distanceTo(to));
+    tr.mesh.scale.set(width, width, from.distanceTo(to));
     tr.mat.color.setHex(color);
-    tr.life = 0.06;
+    tr.life = width > 1 ? 0.14 : 0.06;
     tr.mesh.visible = true;
   }
 
@@ -413,6 +461,25 @@ export class Arsenal {
         box(0.052, 0.012, 0.16, glow, 0, 0.07, -0.12);
         muzzle.position.set(0, 0.04, -0.24);
         break;
+      case 'emp':
+        box(0.055, 0.08, 0.2, body, 0, 0.02, -0.04);
+        box(0.045, 0.14, 0.06, dark, 0, -0.07, 0.04, -0.25);
+        for (const z of [-0.1, -0.15, -0.2]) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.007, 4, 12), glow);
+          ring.position.set(0, 0.03, z);
+          g.add(ring);
+        }
+        box(0.058, 0.012, 0.16, glow, 0, 0.065, -0.03);
+        muzzle.position.set(0, 0.03, -0.24);
+        break;
+      case 'lance':
+        box(0.06, 0.07, 0.5, body, 0, 0, -0.08);
+        box(0.012, 0.03, 0.46, glow, -0.035, 0.03, -0.12);
+        box(0.012, 0.03, 0.46, glow, 0.035, 0.03, -0.12);
+        tube(0.02, 0.14, dark, 0, 0.01, -0.38);
+        box(0.045, 0.14, 0.06, dark, 0, -0.1, 0.02, -0.25);
+        muzzle.position.set(0, 0.01, -0.46);
+        break;
       case 'rifle':
         box(0.07, 0.1, 0.52, body, 0, 0, -0.06);
         tube(0.014, 0.22, dark, 0, 0.015, -0.42);
@@ -445,6 +512,10 @@ export class Arsenal {
     );
     this.rig.rotation.set(this.kick * 0.06 * kickK - dip * 0.7 - sw * 0.6, 0, dip * 0.5);
 
+    const v = this.def ? this.views.get(this.def.model) : undefined;
+    if (v) v.glow.emissiveIntensity = this.def?.mode === 'charge' ? 1.2 + this.charge * 5 : 1.4;
+    this.rig.position.x += this.charge > 0 ? (Math.random() - 0.5) * 0.004 * this.charge : 0;
+
     this.flashT -= dt;
     const on = this.flashT > 0;
     this.flash.visible = on;
@@ -454,7 +525,7 @@ export class Arsenal {
     for (const t of this.tracers) {
       if (t.life <= 0) continue;
       t.life -= dt;
-      t.mat.opacity = Math.max(0, t.life / 0.06) * 0.9;
+      t.mat.opacity = Math.min(1, Math.max(0, t.life / 0.06)) * 0.9;
       if (t.life <= 0) t.mesh.visible = false;
     }
   }

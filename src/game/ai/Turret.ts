@@ -42,6 +42,7 @@ export class TurretKit {
 }
 
 export class Turret implements Enemy {
+  readonly machine = true;
   readonly root = new THREE.Group();
   readonly hitCenter = new THREE.Vector3();
   readonly hitRadius = 0.5;

@@ -41,6 +41,8 @@ export interface ChapterDef {
   /** Metres per second. */
   moveSpeed: number;
   ability: { kind: AbilityKind; name: string; cooldown: number; hint: string };
+  /** Echo can jump again in mid-air. */
+  doubleJump?: boolean;
   loadout: Loadout;
   /** Memory fragments obtainable in this chapter (side missions). */
   fragments: Record<string, string>;
@@ -49,4 +51,6 @@ export interface ChapterDef {
   stages: StageDef[];
   /** Result-screen text on completion. */
   outro: string;
+  /** Overrides `outro` from the session flags (Ch5 endings). */
+  outroFor?(flags: ReadonlySet<string>): { kicker?: string; title?: string; text: string };
 }

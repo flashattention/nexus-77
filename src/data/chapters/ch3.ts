@@ -153,7 +153,7 @@ export const CH3: ChapterDef = {
   loadout: { weapons: ['buddies', 'needle'], grenade: 2 },
   fragments: { cell: '피의자의 기억 — 딸의 생일 케이크', haell: '하엘의 기억 — 에코를 처음 켠 밤' },
   setup,
-  outro: '아이기스와 카이는 업로드 인증 코드를 들고 정비용 수직갱으로 내려갔다. 크로우 국장은 옥상에 남았다. 다음: CH4 「정화」 — 글리치 (v0.5에서 이어집니다)',
+  outro: '아이기스와 카이는 업로드 인증 코드를 들고 정비용 수직갱으로 내려갔다. 크로우 국장은 옥상에 남았다. 다음: CH4 「정화」 — 글리치',
   stages: [
     // ---- 0: interrogation — no combat ----
     {

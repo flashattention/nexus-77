@@ -308,3 +308,7 @@ h1 { margin: 6px 0 0; font: 400 clamp(40px, 6vw, 72px)/1.05 'Black Han Sans', sa
 @media (max-width: 1240px) {
   #game-ui:not(.touch-on) .hud-vitals, #game-ui:not(.touch-on) .hud-weapon { bottom: calc(var(--bot) + 76px); }
 }
+
+/* ---------- v0.5: hack pulse, phase shift ---------- */
+.hud.pulsing .hud-vignette { opacity: 1 !important; background: radial-gradient(ellipse at center, transparent 55%, rgba(57, 255, 136, 0.25) 100%); }
+.hud.phasing .hud-vignette { opacity: 1 !important; background: radial-gradient(ellipse at center, transparent 40%, rgba(196, 160, 255, 0.35) 100%); }
