@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio } from '../audio/Audio';
 import { Figure, type FigureKit } from '../actors/Figure';
 import type { Boss, CombatEnv, Enemy } from './types';
 import { Beam, segDist } from './Beam';
@@ -307,6 +308,7 @@ export class Halo implements Enemy, Boss {
     if (this.slamWind <= 0 && this.slamWind + dt > 0) {
       for (const p of this.slamAt) {
         env.sparks.burst(_v.set(p.x, 0.3, p.z), 16, 0xff3b5c, 6);
+        audio.play('boom', _v, 0.6);
         if (Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z) < SLAM_R && pl.pos.y < 2.5) { pl.damage(22); pl.kick(0.5); }
       }
     }

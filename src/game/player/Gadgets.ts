@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio } from '../audio/Audio';
 import type { GadgetId } from '../../data/weapons';
 import { GADGETS } from '../../data/weapons';
 import type { World } from '../World';
@@ -245,6 +246,7 @@ export class Gadgets {
     env.sparks.burst(_w, 30, 0xfff0d0, 5);
     this.blast.position.copy(_w);
     this.blastT = 0.35;
+    audio.play('boom', _w);
     for (const tg of env.targets) {
       if (!tg.alive) continue;
       const d = tg.hitCenter.distanceTo(_w);

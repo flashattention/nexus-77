@@ -3,6 +3,7 @@ import { SPEAKERS, type Line } from '../../data/speakers';
 import { GADGETS, type GadgetId } from '../../data/weapons';
 import { ITEMS } from '../../data/items';
 import type { Input } from '../Input';
+import { audio } from '../audio/Audio';
 
 export interface HotbarSlot { name: string; kind: string; ammo: number; reserve: number; accent: number }
 
@@ -249,6 +250,7 @@ export class Hud {
   damageFlash(): void { this.dmgT = 0.4; }
 
   toast(text: string, seconds = 2.6): void {
+    if (!text.startsWith('체크포인트')) audio.play('toast');
     this.toastEl.textContent = text;
     this.toastEl.classList.add('on');
     this.toastT = seconds;
@@ -385,6 +387,7 @@ class DialogueBox {
     this.timer = window.setInterval(() => {
       this.shown = Math.min(this.full.length, this.shown + 1);
       this.text.textContent = this.full.slice(0, this.shown);
+      if (this.shown % 2 === 0 && this.full[this.shown - 1] !== ' ') audio.play('blip');
       if (this.shown >= this.full.length) this.finishLine();
     }, 1000 / TYPE_CPS);
   }

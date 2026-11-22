@@ -27,7 +27,9 @@ import { Pickups, pickupLabel, type Pickup } from './Pickups';
 import { Hud, type ObjectiveView } from './ui/Hud';
 import { Director, type DirectorHost, type Interactable } from './story/Director';
 import { loadProgress, saveProgress, type ChapterSave } from './Progress';
-import { readKey, writeKey } from './Storage';
+import { settings, onSettings } from './Settings';
+import { settingsPanel } from './ui/SettingsPanel';
+import { audio, type SfxName, type TrackName } from './audio/Audio';
 
 type State = 'intro' | 'play' | 'talk' | 'paused' | 'won' | 'lost';
 
@@ -37,22 +39,6 @@ export interface GameCallbacks {
   onRestart(stage: number): void;
   /** Continue with the next chapter (set when there is one). */
   onNext?: () => void;
-}
-
-export const SETTINGS_KEY = 'nexus77.settings';
-interface Settings { sensitivity: number; autoFire: boolean }
-
-function loadSettings(): Settings {
-  const def: Settings = { sensitivity: 1, autoFire: false };
-  try {
-    const raw = readKey(SETTINGS_KEY);
-    return raw ? { ...def, ...(JSON.parse(raw) as Partial<Settings>) } : def;
-  } catch {
-    return def;
-  }
-}
-function saveSettings(s: Settings): void {
-  writeKey(SETTINGS_KEY, JSON.stringify(s));
 }
 
 const IDLE_INPUT: InputState = {
@@ -133,7 +119,12 @@ export class Game implements FrameDriver, DirectorHost {
   private elapsed = 0;
   private downs = 0;
   private stage: number;
-  private settings = loadSettings();
+  private offSettings: () => void;
+  private prevHp = 0;
+  private prevBlock = 99;
+  private prevDashCd = 0;
+  private prevActive = false;
+  private cullR2 = CULL_R2;
   private progress = loadProgress();
   private alarmCd = 0;
 
@@ -146,10 +137,22 @@ export class Game implements FrameDriver, DirectorHost {
 
     this.world = new World(ctx.level);
     this.input = new Input(ctx.r.domElement, overlay);
-    this.input.sensitivity = this.settings.sensitivity;
+    const cfg = settings();
+    this.input.sensitivity = cfg.sensitivity;
     this.player = new FPSController(this.world, cam, { maxHp: chapter.maxHp, moveSpeed: chapter.moveSpeed, dashCooldown: chapter.ability.cooldown });
     this.arsenal = new Arsenal(this.scene, cam);
-    this.arsenal.autoFire = this.settings.autoFire;
+    this.arsenal.autoFire = cfg.autoFire;
+    this.arsenal.onEvent = (e, def) => {
+      if (e === 'shot') audio.play(`shot:${def.model}` as SfxName);
+      else audio.play('reload');
+    };
+    this.offSettings = onSettings((v) => {
+      this.input.sensitivity = v.sensitivity;
+      this.arsenal.autoFire = v.autoFire;
+      this.cullR2 = v.quality === 'low' ? 26 * 26 : CULL_R2;
+    });
+    this.cullR2 = cfg.quality === 'low' ? 26 * 26 : CULL_R2;
+    audio.music(district.id as TrackName);
     this.gadgets = new Gadgets(this.scene, this.droneKit);
     this.sparks = new Sparks(this.scene);
     this.pickups = new Pickups(this.scene);
@@ -236,7 +239,7 @@ export class Game implements FrameDriver, DirectorHost {
       if (this.ability.takePulse()) this.applyPulse();
       if (live && this.player.alive) {
         this.arsenal.update(dt, inp.state, this.player, this.world, targets, this.sparks, inp.touchMode, {
-          onHit: (kill, head) => this.hud.hitMarker(kill, head),
+          onHit: (kill, head) => { this.hud.hitMarker(kill, head); audio.play(kill ? 'kill' : head ? 'head' : 'hit'); },
         });
         if (inp.state.grenade) {
           if (this.rideObj) this.hud.toast('주행 중에는 수류탄을 던질 수 없다');
@@ -260,14 +263,14 @@ export class Game implements FrameDriver, DirectorHost {
         if (h) this.updateHacked(e, h, wdt);
         else e.update(wdt, t, this.env);
         // Distance cull: fog makes anything past ~35 m invisible, so skip its draw calls.
-        if (e.root.parent === this.scene) e.root.visible = e.root.position.distanceToSquared(eye) < CULL_R2;
+        if (e.root.parent === this.scene) e.root.visible = e.root.position.distanceToSquared(eye) < this.cullR2;
       }
       if (this.enemies.length > 24) this.enemies = this.enemies.filter((e) => !e.gone);
       let dmg = 0;
       for (const k of BOLT_KINDS) dmg += this.bolts[k].update(wdt, this.world, this.player, this.sparks);
       if (dmg > 0) this.hud.damageFlash();
       for (const n of this.npcs) {
-        n.root.visible = n.pos.distanceToSquared(eye) < CULL_R2;
+        n.root.visible = n.pos.distanceToSquared(eye) < this.cullR2;
         if (n.root.visible) n.update(dt, t, eye);
       }
       const cenv = { world: this.world, player: this.player, sparks: this.sparks, targets };
@@ -287,6 +290,8 @@ export class Game implements FrameDriver, DirectorHost {
         this.updateDeath(dt);
       }
     }
+
+    if (running) this.updateAudio();
 
     // Followers (rain) and the sun track the player.
     const p = this.player.pos;
@@ -317,6 +322,9 @@ export class Game implements FrameDriver, DirectorHost {
 
   dispose(): void {
     this.director.dead = true;
+    this.offSettings();
+    audio.setCharge(0);
+    audio.setIntensity(0);
     this.input.dispose();
     this.hud.dispose();
     this.gadgets.clear();
@@ -385,7 +393,10 @@ export class Game implements FrameDriver, DirectorHost {
     if (p && !this.cinematic) this.setCinematic(true);
   }
 
-  setBoss(b: Boss | null): void { this.boss = b; }
+  setBoss(b: Boss | null): void {
+    if (b && b !== this.boss) audio.play('alarm');
+    this.boss = b;
+  }
 
   get ride(): RailRide | null { return this.rideObj; }
 
@@ -478,7 +489,7 @@ export class Game implements FrameDriver, DirectorHost {
     for (const e of near) {
       if (e.onPulse) {
         const r = e.onPulse();
-        if (r === 'rescued') { rescued++; this.sparks.burst(e.hitCenter, 14, 0x9fffc4, 3); }
+        if (r === 'rescued') { rescued++; this.sparks.burst(e.hitCenter, 14, 0x9fffc4, 3); audio.play('rescue', e.hitCenter); }
         else if (r === 'hacked') special = true;
         continue;
       }
@@ -506,6 +517,7 @@ export class Game implements FrameDriver, DirectorHost {
     }
     this.scene.add(fx.ring);
     this.hacked.set(e, { t: HACK_TIME, fireT: 0.4, ...fx });
+    audio.play('hack', e.hitCenter);
     this.sparks.burst(e.hitCenter, 16, 0x39ff88, 3);
   }
 
@@ -543,6 +555,7 @@ export class Game implements FrameDriver, DirectorHost {
     }
     if (!best) return;
     best.damage(HACK_DAMAGE * (best.machine ? 1.5 : 1), best.hitCenter);
+    audio.play('bolt', e.hitCenter, 0.7);
     this.sparks.burst(best.hitCenter, 5, 0x39ff88, 3);
     h.beam.show(e.hitCenter, best.hitCenter, 0.9, 1.5);
     // Face the target (cosmetic).
@@ -586,13 +599,14 @@ export class Game implements FrameDriver, DirectorHost {
         break;
       case 'item': this.director.addItem(k.item); break;
     }
-    if (ok) (p.root.userData.onTaken as (() => void) | undefined)?.();
+    if (ok) { audio.play('pickup'); (p.root.userData.onTaken as (() => void) | undefined)?.(); }
     else if (!p.root.userData.warned) { p.root.userData.warned = true; this.hud.toast(`${pickupLabel(k)}: 지금은 필요 없다`); }
     return ok;
   }
 
   private handleDowned(e: Enemy, at: THREE.Vector3): void {
     this.downs++;
+    audio.play('down', at);
     const pos = new THREE.Vector3(at.x, at.y, at.z);
     pos.y = Math.max(0, this.groundBelow(pos)); // drop onto the floor below drones
     const drop = e.drop ?? (e instanceof Gangster && Math.random() < GANG_AMMO_DROP ? 'ammo' : undefined);
@@ -706,7 +720,7 @@ export class Game implements FrameDriver, DirectorHost {
       this.chapter.setup?.(d);
       const first = this.stage;
       for (let i = first; i < stages.length; i++) {
-        if (i > first) { this.checkpoint(i); this.hud.toast(`체크포인트 — ${stages[i].name}`); }
+        if (i > first) { this.checkpoint(i); this.hud.toast(`체크포인트 — ${stages[i].name}`); audio.play('checkpoint'); }
         await stages[i].run(d);
         if (d.dead) return;
       }
@@ -732,7 +746,7 @@ export class Game implements FrameDriver, DirectorHost {
       kicker: `CHAPTER ${pad(this.chapter.no)} · ${this.chapter.time}`,
       title: '일시정지',
       sub: `현재 구간: ${this.chapter.stages[this.stage].name}`,
-      extra: this.settingsPanel(),
+      extra: settingsPanel({ touch: this.input.touchMode, onEditLayout: () => this.editLayout() }),
       buttons: [
         { label: '계속하기', primary: true, onClick: () => this.begin(false) },
         { label: '체크포인트부터', onClick: () => this.cb.onRestart(this.stage) },
@@ -744,6 +758,8 @@ export class Game implements FrameDriver, DirectorHost {
   private finish(won: boolean): void {
     if (this.state === 'won' || this.state === 'lost') return;
     this.state = won ? 'won' : 'lost';
+    audio.play(won ? 'win' : 'lose');
+    audio.setCharge(0);
     this.input.setEnabled(false);
     this.setCinematic(false);
     if (this.input.locked) document.exitPointerLock();
@@ -801,37 +817,42 @@ export class Game implements FrameDriver, DirectorHost {
     });
   }
 
-  private settingsPanel(): HTMLElement {
-    const box = document.createElement('div');
-    box.className = 'screen-settings';
-    const sens = document.createElement('label');
-    sens.innerHTML = '<span>조준 감도</span>';
-    const range = document.createElement('input');
-    range.type = 'range'; range.min = '0.4'; range.max = '2'; range.step = '0.1';
-    range.value = String(this.settings.sensitivity);
-    range.addEventListener('input', () => {
-      this.settings.sensitivity = Number(range.value);
-      this.input.sensitivity = this.settings.sensitivity;
-      saveSettings(this.settings);
+  /** Touch layout editor, opened from the pause screen. */
+  private editLayout(): void {
+    this.hud.hideScreen();
+    this.input.editLayout(() => {
+      this.state = 'play';
+      this.pause();
     });
-    sens.appendChild(range);
-    box.appendChild(sens);
-    if (this.input.touchMode) {
-      const af = document.createElement('label');
-      af.className = 'check';
-      const cbx = document.createElement('input');
-      cbx.type = 'checkbox';
-      cbx.checked = this.settings.autoFire;
-      cbx.addEventListener('change', () => {
-        this.settings.autoFire = cbx.checked;
-        this.arsenal.autoFire = cbx.checked;
-        saveSettings(this.settings);
-      });
-      af.append(cbx, Object.assign(document.createElement('span'), { textContent: '자동 사격 (조준점이 적 위에 있으면 발사)' }));
-      box.appendChild(af);
-    }
-    return box;
   }
+
+  private updateAudio(): void {
+    const p = this.player;
+    audio.setListener(p.eye, p.yaw);
+    audio.setCharge(this.state === 'play' ? this.arsenal.charge : 0);
+    // Music intensity: a boss fight, or anything hostile close by.
+    let fight = this.boss && this.boss.engaged && !this.boss.defeated ? 1 : 0;
+    if (!fight) for (const e of this.enemies) if (e.alive && !this.hacked.has(e) && e.hitCenter.distanceToSquared(p.pos) < 400) { fight = 1; break; }
+    audio.setIntensity(fight);
+    if (p.hp < this.prevHp - 0.5) audio.play('hurt');
+    this.prevHp = p.hp;
+    const sh = p.shield;
+    if (sh && sh.sinceBlock < this.prevBlock) audio.play('block');
+    this.prevBlock = sh ? sh.sinceBlock : 99;
+    // Ability cues.
+    const ab = this.ability;
+    if (ab.kind === 'dash' && p.dashCd > this.prevDashCd + 0.5) audio.play('dash');
+    this.prevDashCd = p.dashCd;
+    const act = ab.active;
+    if (act !== this.prevActive) {
+      if (ab.kind === 'overdrive' && act) audio.play('overdrive');
+      else if (ab.kind === 'shield') audio.play(act ? 'shieldUp' : 'shieldDown');
+      else if (ab.kind === 'pulse' && act) audio.play('pulse');
+      else if (ab.kind === 'phase' && act) audio.play('phase');
+    }
+    this.prevActive = act;
+  }
+
 }
 
 function pad(n: number): string { return String(n).padStart(2, '0'); }

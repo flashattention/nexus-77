@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio } from '../audio/Audio';
 import type { Rect } from '../../engine/types';
 import type { Vec3T } from '../../data/chapters/types';
 import type { Boss, CombatEnv, Enemy, PulseResult } from './types';
@@ -260,6 +261,7 @@ export class Grinder implements Enemy, Boss {
             pl.kick(0.7);
           }
           env.sparks.burst(_p.set(this.pos.x, 0.5, this.pos.z), 40, 0xc8a070, 7);
+          audio.play('boom', _p);
         }
         break;
       case 'erupt':
@@ -285,6 +287,7 @@ export class Grinder implements Enemy, Boss {
       if (this.state === 'charge' && Math.hypot(this.pos.x - px, this.pos.z - pz) < CHARGE * dt * 0.3) {
         env.sparks.burst(_p.set(this.pos.x + this.chargeDir.x * 2.6, 1.2, this.pos.z + this.chargeDir.z * 2.6), 40, 0xffb347, 7);
         pl.kick(0.35);
+        audio.play('boom', this.hitCenter, 0.8);
         this.state = 'overheat';
         this.timer = OVERHEAT;
         this.vel.set(0, 0, 0);

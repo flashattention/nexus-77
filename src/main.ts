@@ -1,10 +1,20 @@
+// Fonts are bundled (offline / Capacitor); the Korean font is split into unicode-range chunks loaded on demand.
+import '@fontsource/noto-sans-kr/400.css';
+import '@fontsource/noto-sans-kr/500.css';
+import '@fontsource/noto-sans-kr/700.css';
+import '@fontsource/black-han-sans/400.css';
+import '@fontsource/space-grotesk/500.css';
+import '@fontsource/space-grotesk/700.css';
 import './style.css';
 import { Viewer } from './app/Viewer';
 import { DISTRICTS, type District } from './data/districts';
 import { chapterForDistrict, isUnlocked, nextChapter } from './data/chapters';
 import { loadProgress, PROGRESS_KEY } from './game/Progress';
-import { Game, SETTINGS_KEY } from './game/Game';
+import { Game } from './game/Game';
 import { hydrate } from './game/Storage';
+import { SETTINGS_KEY, onSettings, reloadSettings, settings, type Settings } from './game/Settings';
+import { settingsPanel } from './game/ui/SettingsPanel';
+import { audio, type TrackName } from './game/audio/Audio';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -25,7 +35,46 @@ const ui = {
   spin: $<HTMLButtonElement>('#spin'),
   play: $<HTMLButtonElement>('#play'),
   gameUi: $<HTMLDivElement>('#game-ui'),
+  settings: $<HTMLButtonElement>('#settings'),
+  modal: $<HTMLDivElement>('#menu-modal'),
+  fps: $<HTMLDivElement>('#fps'),
 };
+
+// ---------- settings, audio ----------
+
+function applySettings(s: Settings): void {
+  viewer.setQuality(s.quality);
+  audio.setVolumes({ master: s.master, music: s.music, sfx: s.sfx });
+  ui.fps.classList.toggle('on', s.showFps);
+  viewer.fpsEl = s.showFps ? ui.fps : null;
+}
+onSettings(applySettings);
+
+// Audio may only start inside a user gesture (mobile browsers): unlock on the first one, resume after interruptions.
+for (const ev of ['pointerdown', 'touchend', 'keydown'] as const) window.addEventListener(ev, audio.unlock, { passive: true });
+// Button clicks anywhere in the UI get a soft tick.
+document.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('button')) audio.play('ui'); });
+
+function openSettings(): void {
+  const card = document.createElement('div');
+  card.className = 'screen-card';
+  card.append(
+    Object.assign(document.createElement('div'), { className: 'screen-kicker', textContent: 'SETTINGS' }),
+    Object.assign(document.createElement('h2'), { textContent: '설정' }),
+    settingsPanel({ touch: matchMedia('(pointer: coarse)').matches }),
+  );
+  const btns = document.createElement('div');
+  btns.className = 'screen-btns';
+  const close = Object.assign(document.createElement('button'), { type: 'button', className: 'primary', textContent: '닫기' });
+  close.addEventListener('click', () => ui.modal.classList.remove('on'));
+  btns.appendChild(close);
+  card.appendChild(btns);
+  ui.modal.replaceChildren(card);
+  ui.modal.classList.add('on');
+  close.focus();
+}
+ui.settings.addEventListener('click', openSettings);
+ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) ui.modal.classList.remove('on'); });
 
 let current = 0;
 let game: Game | null = null;
@@ -111,6 +160,7 @@ function select(i: number): void {
   const d = DISTRICTS[current];
   render(d, current);
   viewer.load(d);
+  audio.music(d.id as TrackName);
   history.replaceState(null, '', `#${d.id}`);
 }
 
@@ -168,6 +218,8 @@ const fontReady = Promise.race([
 ]);
 // Native builds restore saved progress before the first screen (no-op on the web).
 void Promise.all([hydrate([PROGRESS_KEY, SETTINGS_KEY]), fontReady]).then(() => {
+  reloadSettings();
+  applySettings(settings());
   const h0 = parseHash();
   select(h0.i >= 0 ? h0.i : 0);
   // The #district/play route skips the chapter lock (direct links, testing).

@@ -441,6 +441,7 @@ export const CH5: ChapterDef = {
           ]);
           d.sw('dawn', true);
         }
+        if (id !== 'rule') d.music('dawn');
         d.ending(id);
         await d.fade(1, 2, id === 'rule' ? '05:00 — 도시가 조용해졌다' : id === 'free' ? '05:00 — 새벽' : '05:12 — 네온 바자르, 새벽');
         await d.wait(2.2);

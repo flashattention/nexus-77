@@ -6,7 +6,7 @@
 
 - 사이버펑크 3D 웹 게임. three.js r187 + Vite + TypeScript. 나중에 Capacitor로 모바일 이식.
 - 1인칭 FPS 스토리 게임 「NEXUS-77: 오버라이드」. 챕터(구역)마다 다른 주인공 5명.
-- 현재 v0.5(Ch1–5 + 엔딩 3종) 완료, 다음 목표는 `docs/ROADMAP.md`의 v0.6(폴리싱·성능)이다.
+- 현재 v0.6(사운드·품질 설정·버튼 배치·폰트 번들) 완료. 남은 일은 실기기 성능 측정과 Capacitor 이식(`docs/ROADMAP.md`)이다.
 - 작업을 마치면 빌드 통과 후 커밋하고 `https://github.com/flashattention/nexus-77`(origin)에 푸시한다.
 - 기획은 `docs/GAME_DESIGN.md`(v0.2 확정). 기획에서 벗어나는 변경은 사용자에게 먼저 확인한다.
 - UI 문구는 한국어로 쓴다. 코드 주석과 식별자는 영어로 쓴다.
@@ -29,7 +29,8 @@ npm run build      # 타입 체크 + 빌드 (커밋 전에 반드시 통과)
 - 정적 소품은 그룹에 모아 `kit.bake`로 병합하고, 재질은 `kit.mat`으로 공유한다(드로우콜). 움직이는 오브젝트는 `userData.dynamic = true`.
 - 프레임 안 할당 최소화: 루프에서 `new THREE.Vector3()` 금지, 임시 벡터는 모듈 상수로 재사용한다.
 - 장면을 교체하거나 엔티티를 제거할 땐 geometry·material·texture를 `dispose()`한다(`Viewer.disposeScene` 참고).
-- 외부 에셋을 추가할 땐 `public/`에 넣고 상대 경로로 참조한다(Capacitor 호환). CDN 런타임 의존은 늘리지 않는다.
+- 외부 에셋을 추가할 땐 `public/`에 넣고 상대 경로로 참조한다(Capacitor 호환). CDN 런타임 의존은 늘리지 않는다. 폰트는 `@fontsource/*`를 `main.ts`에서 import해 번들한다.
+- 소리는 `game/audio/Audio.ts`의 `audio.play(name, at?)`로 낸다(합성음). 설정은 `game/Settings.ts`(`settings()`, `updateSettings()`, `onSettings()`)를 쓴다.
 
 ## 모바일 고려 (항상)
 

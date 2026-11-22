@@ -1,3 +1,4 @@
+import { settings, updateSettings } from './Settings';
 /**
  * Merges keyboard + mouse (pointer lock) + touch into one per-frame state.
  * Touch: dynamic joystick on the left 40% of the screen, drag-to-aim on the
@@ -38,6 +39,8 @@ export interface InputState {
 export type InputAction = 'jump' | 'dash' | 'reload' | 'pause' | 'use' | 'grenade' | 'gadget';
 
 type ButtonId = 'fire' | 'jump' | 'dash' | 'reload' | 'use' | 'laneL' | 'laneR';
+/** Buttons the player may move in the layout editor. */
+const MOVABLE: ButtonId[] = ['fire', 'jump', 'dash', 'reload', 'use', 'laneL', 'laneR'];
 
 export class Input {
   readonly state: InputState = {
@@ -86,6 +89,91 @@ export class Input {
     overlay.appendChild(this.touchRoot);
     this.applyTouchMode();
     this.bind();
+    this.applyLayout();
+    this.on(window, 'resize', () => this.applyLayout());
+  }
+
+  // ---------- touch button layout ----------
+
+  private get orientation(): 'landscape' | 'portrait' {
+    return window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait';
+  }
+
+  /** Place the touch buttons from the saved layout for the current orientation. */
+  applyLayout(): void {
+    const l = settings().layout[this.orientation];
+    for (const id of MOVABLE) {
+      const b = this.buttons[id], p = l[id];
+      if (p) Object.assign(b.style, { left: `${p.x * 100}vw`, top: `${p.y * 100}vh`, right: 'auto', bottom: 'auto', transform: 'translate(-50%, -50%)' });
+      else Object.assign(b.style, { left: '', top: '', right: '', bottom: '', transform: '' });
+    }
+  }
+
+  /**
+   * Drag the touch buttons around; `onDone` runs when the player taps 완료.
+   * Positions are saved per orientation as viewport fractions.
+   */
+  editLayout(onDone: () => void): void {
+    const root = this.touchRoot;
+    root.classList.add('editing');
+    const bar = el('div', 'layout-bar');
+    bar.innerHTML = '<span>버튼을 끌어서 옮기세요</span>';
+    const mkBtn = (label: string, fn: () => void): void => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', fn);
+      bar.appendChild(b);
+    };
+    const offs: Array<() => void> = [];
+    const finish = (): void => {
+      for (const f of offs) f();
+      bar.remove();
+      root.classList.remove('editing');
+      onDone();
+    };
+    mkBtn('기본값', () => {
+      const s = settings();
+      updateSettings({ layout: { ...s.layout, [this.orientation]: {} } });
+      this.applyLayout();
+    });
+    mkBtn('완료', finish);
+    root.appendChild(bar);
+    for (const id of MOVABLE) {
+      const b = this.buttons[id];
+      let drag = -1;
+      const down = (e: PointerEvent): void => {
+        e.preventDefault();
+        e.stopPropagation();
+        drag = e.pointerId;
+        try { b.setPointerCapture(e.pointerId); } catch { /* released */ }
+      };
+      const move = (e: PointerEvent): void => {
+        if (e.pointerId !== drag) return;
+        const x = Math.min(0.97, Math.max(0.03, e.clientX / window.innerWidth));
+        const y = Math.min(0.97, Math.max(0.03, e.clientY / window.innerHeight));
+        Object.assign(b.style, { left: `${x * 100}vw`, top: `${y * 100}vh`, right: 'auto', bottom: 'auto', transform: 'translate(-50%, -50%)' });
+      };
+      const up = (e: PointerEvent): void => {
+        if (e.pointerId !== drag) return;
+        drag = -1;
+        const r = b.getBoundingClientRect();
+        const s = settings();
+        const cur = { ...s.layout[this.orientation], [id]: { x: (r.left + r.width / 2) / window.innerWidth, y: (r.top + r.height / 2) / window.innerHeight } };
+        updateSettings({ layout: { ...s.layout, [this.orientation]: cur } });
+      };
+      // Capture phase so the normal button handlers never see edit drags.
+      b.addEventListener('pointerdown', down, true);
+      b.addEventListener('pointermove', move);
+      b.addEventListener('pointerup', up);
+      b.addEventListener('pointercancel', up);
+      offs.push(() => {
+        b.removeEventListener('pointerdown', down, true);
+        b.removeEventListener('pointermove', move);
+        b.removeEventListener('pointerup', up);
+        b.removeEventListener('pointercancel', up);
+      });
+    }
   }
 
   setEnabled(on: boolean): void {

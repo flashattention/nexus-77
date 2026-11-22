@@ -62,6 +62,8 @@ export class Arsenal {
   hits = 0;
   /** Touch-only: fire automatically when the crosshair rests on a target. */
   autoFire = false;
+  /** Sound / feedback hook: a shot left the barrel or a reload started. */
+  onEvent: ((e: 'shot' | 'reload', def: WeaponDef) => void) | null = null;
 
   private cooldown = 0;
   private spread = 0;
@@ -301,6 +303,7 @@ export class Arsenal {
 
   private startReload(slot: Slot): void {
     this.reloading = slot.def.reloadTime;
+    this.onEvent?.('reload', slot.def);
     this.burstLeft = 0;
   }
 
@@ -308,6 +311,7 @@ export class Arsenal {
     const d = slot.def;
     this.cooldown = Math.max(this.cooldown, 60 / d.rpm);
     slot.ammo--;
+    this.onEvent?.('shot', d);
     this.shots++;
     const pellets = d.pellets ?? 1;
     let anyHit = false, anyKill = false, anyHead = false;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio, type TrackName } from '../audio/Audio';
 import type { LevelData } from '../../engine/types';
 import type { Line } from '../../data/speakers';
 import type { Vec3T } from '../../data/chapters/types';
@@ -453,6 +454,9 @@ export class Director {
   }
 
   boss(b: Boss | null): void { this.host.setBoss(b); }
+
+  /** Switch the background music (endings). */
+  music(name: TrackName | null): void { audio.music(name); }
 
   // ---------- hoverbike ----------
 

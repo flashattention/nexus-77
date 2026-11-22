@@ -3,6 +3,9 @@ import { SceneKit } from '../engine/SceneKit';
 import type { SceneCtx, SceneMode } from '../engine/types';
 import type { District } from '../data/districts';
 
+export type QualityPreset = 'auto' | 'low' | 'medium' | 'high';
+type Level = 'low' | 'medium' | 'high';
+
 const DEFAULT_CAM = new THREE.Vector3(0.4, 2.1, 7.8);
 const DEFAULT_LOOK = new THREE.Vector3(0.4, 1.3, 0);
 /** Hero stands around x≈1.8 in every scene; portrait screens re-centre on it. */
@@ -30,13 +33,26 @@ export class Viewer {
   private pointer = { x: 0, y: 0, sx: 0, sy: 0 };
   private raf = 0;
   private driver: FrameDriver | null = null;
-  readonly quality: 'high' | 'low';
+  private readonly touch = matchMedia('(pointer: coarse)').matches;
+  /** Device guess used by the 'auto' preset. */
+  private readonly autoLevel: Level;
+  private preset: QualityPreset = 'auto';
+  /** Dynamic resolution scale (auto preset drops it when frames run slow). */
+  private dyn = 1;
+  private fpsAcc = 0;
+  private fpsFrames = 0;
+  private slowWindows = 0;
+  private fastWindows = 0;
+  /** Frames per second over the last half second. */
+  fps = 0;
+  /** Optional on-screen counter. */
+  fpsEl: HTMLElement | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
-    const lowEnd = (navigator.hardwareConcurrency ?? 8) <= 4 || matchMedia('(pointer: coarse)').matches;
-    this.quality = lowEnd ? 'low' : 'high';
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality === 'high', alpha: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : 1.5));
+    const lowEnd = (navigator.hardwareConcurrency ?? 8) <= 4 || this.touch;
+    this.autoLevel = lowEnd ? 'medium' : 'high';
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowEnd, alpha: true, powerPreference: 'high-performance' });
+    this.applyPixelRatio();
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -69,13 +85,8 @@ export class Viewer {
         anchors: {}, switches: {}, followPlayer: [], hazards: [] },
     };
     d.build(this.kit, ctx);
-    if (this.quality === 'low') {
-      scene.traverse((o) => {
-        const l = o as THREE.DirectionalLight;
-        if (l.isDirectionalLight && l.castShadow) l.shadow.mapSize.set(1024, 1024);
-      });
-    }
     this.ctx = ctx;
+    this.applyShadows(false);
     this.base.copy(cam.position);
     this.baseLook.copy(ctx.look);
     this.timer = new THREE.Timer();
@@ -86,6 +97,60 @@ export class Viewer {
 
   setDriver(driver: FrameDriver | null): void {
     this.driver = driver;
+  }
+
+  get level(): Level { return this.preset === 'auto' ? this.autoLevel : this.preset; }
+
+  /** Graphics preset: pixel ratio cap (mobile ≤ 1.5) and shadow quality. */
+  setQuality(p: QualityPreset): void {
+    if (p === this.preset) return;
+    this.preset = p;
+    this.dyn = 1;
+    this.applyPixelRatio();
+    this.applyShadows(true);
+  }
+
+  private applyPixelRatio(): void {
+    const lv = this.level;
+    const cap = lv === 'low' ? 1 : lv === 'medium' ? 1.25 : this.touch ? 1.5 : 2;
+    this.renderer.setPixelRatio(Math.max(0.6, Math.min(window.devicePixelRatio || 1, cap) * this.dyn));
+    this.resize();
+  }
+
+  /** Low: no shadows. Medium: 1024 map. High: 2048. */
+  private applyShadows(recompile: boolean): void {
+    const lv = this.level;
+    const r = this.renderer;
+    const on = lv !== 'low';
+    const changed = r.shadowMap.enabled !== on;
+    r.shadowMap.enabled = on;
+    const size = lv === 'high' ? 2048 : 1024;
+    this.ctx?.scene.traverse((o) => {
+      const l = o as THREE.DirectionalLight;
+      if (l.isDirectionalLight && l.castShadow && l.shadow.mapSize.x !== size) {
+        l.shadow.mapSize.set(size, size);
+        l.shadow.map?.dispose();
+        l.shadow.map = null;
+      }
+      // Toggling shadows changes shader programs.
+      const m = (o as THREE.Mesh).material;
+      if (recompile && changed && m) for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+    });
+  }
+
+  /** Auto preset: lower the render resolution when frames are slow, raise it back when there is headroom. */
+  private trackFps(dt: number): void {
+    this.fpsAcc += dt;
+    this.fpsFrames++;
+    if (this.fpsAcc < 0.5) return;
+    this.fps = this.fpsFrames / this.fpsAcc;
+    this.fpsAcc = 0;
+    this.fpsFrames = 0;
+    if (this.fpsEl) this.fpsEl.textContent = `${Math.round(this.fps)} FPS · ${this.renderer.info.render.calls} DC · x${this.renderer.getPixelRatio().toFixed(2)}`;
+    if (this.preset !== 'auto' || !this.driver) return;
+    if (this.fps < 28) { this.slowWindows++; this.fastWindows = 0; } else if (this.fps > 55) { this.fastWindows++; this.slowWindows = 0; } else { this.slowWindows = this.fastWindows = 0; }
+    if (this.slowWindows >= 4 && this.dyn > 0.6) { this.dyn = Math.max(0.6, this.dyn - 0.15); this.slowWindows = 0; this.applyPixelRatio(); }
+    if (this.fastWindows >= 10 && this.dyn < 1) { this.dyn = Math.min(1, this.dyn + 0.1); this.fastWindows = 0; this.applyPixelRatio(); }
   }
 
   private resize(): void {
@@ -103,6 +168,7 @@ export class Viewer {
     if (!ctx) return;
     this.timer.update();
     const t = this.timer.getElapsed();
+    this.trackFps(Math.min(0.25, this.timer.getDelta()));
     if (this.driver) {
       const dt = Math.min(0.05, this.timer.getDelta());
       for (const f of ctx.up) f(t);

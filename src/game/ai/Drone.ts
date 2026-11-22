@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio } from '../audio/Audio';
 import type { World } from '../World';
 import type { Sparks } from '../fx/Sparks';
 import type { FPSController } from '../player/FPSController';
@@ -92,6 +93,7 @@ export class Bolts {
     b.lookAt(to);
     b.visible = true;
     this.life[i] = this.style.life ?? 3;
+    audio.play('bolt', from, this.style.life ? 0.4 : 1);
   }
 
   clear(): void {
